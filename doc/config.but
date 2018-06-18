@@ -935,6 +935,23 @@ right in all situations.
 You may also find you need to disable Arabic text shaping;
 see \k{config-features-shaping}.
 
+\S{config-features-osc52} Allowing \i{remote-controlled clipboard}
+
+\cfg{winhelp-topic}{features.osc52}
+
+PuTTY has the ability to allow a remote server to place text in the
+client's clipboard, using the OSC 52 escape sequence. This can be
+useful when using programs such as tmux or certain text editors on
+the server.
+
+Note that when this setting is enabled, any program on the server
+able to write to the terminal device used by PuTTY will be able
+to write to the clipboard on the client machine at any time. In
+most cases, this will be done in response to some user action
+(e.g. selecting text in a tmux pane), but such action is not
+required. If you find your clipboard being set unexpectedly, try
+disabling this option.
+
 \H{config-window} The Window panel
 
 The Window configuration panel allows you to control aspects of the

@@ -1479,6 +1479,7 @@ void term_copy_stuff_from_conf(Terminal *term)
     term->no_remote_resize = conf_get_bool(term->conf, CONF_no_remote_resize);
     term->no_remote_wintitle = conf_get_bool(term->conf, CONF_no_remote_wintitle);
     term->no_remote_clearscroll = conf_get_bool(term->conf, CONF_no_remote_clearscroll);
+    term->osc52 = conf_get_bool(term->conf, CONF_osc52);
     term->rawcnp = conf_get_bool(term->conf, CONF_rawcnp);
     term->utf8linedraw = conf_get_bool(term->conf, CONF_utf8linedraw);
     term->rect_select = conf_get_bool(term->conf, CONF_rect_select);
@@ -2813,7 +2814,43 @@ static void do_osc(Terminal *term)
                 }
             }
             break;
-        }
+          case 52:
+            if (term->osc52) {
+                /* Look for first semicolon, to find beginning of 2nd
+                 * argument. If no semicolon found, or the first arg is present
+                 * and not 'c', there's nothing to do.
+                 */
+                char *semi = strchr(term->osc_string, ';');
+                if (0 == semi ||
+                    (semi != term->osc_string && term->osc_string[0] != 'c')) {
+                    break;
+                }
+
+                /* Decode base64 encoded 2nd parameter */
+                unsigned char decoded[2 * OSC_STR_MAX + 1] = { 0 };
+                int decoded_len = 0;
+                for (int i = 1 + semi - term->osc_string; /* start after semi */
+                     i < term->osc_strlen && decoded_len < 2 * OSC_STR_MAX;
+                     i += 4) {
+                     decoded_len += base64_decode_atom(term->osc_string + i,
+                                                       decoded + decoded_len);
+                }
+
+                /* convert to wchar_t. add 1 to result to account for
+                 * null terminator (mbstowcs doesn't seem to include it in its
+                 * return value).
+                 */
+                wchar_t clipdata[2 * OSC_STR_MAX + 1] = { 0 };
+                int clipdata_len = mbstowcs(clipdata, (char*)decoded,
+                                            2 * OSC_STR_MAX) + 1;
+
+                for(int i = 0; i < term->n_mouse_select_clipboards; i++) {
+                    win_clip_write(term->win, term->mouse_select_clipboards[i],
+                               clipdata, 0, 0, clipdata_len, FALSE);
+                }
+            }
+            break;
+	}
     }
 }
 

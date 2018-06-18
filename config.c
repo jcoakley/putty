@@ -1846,6 +1846,9 @@ void setup_config_box(struct controlbox *b, bool midsession,
     ctrl_checkbox(s, "Disable bidirectional text display",
                   'd', HELPCTX(features_bidi), conf_checkbox_handler,
                   I(CONF_no_bidi));
+    ctrl_checkbox(s, "Allow remote-controlled clipboard",
+                  'm', HELPCTX(features_osc52), conf_checkbox_handler,
+                  I(CONF_osc52));
 
     /*
      * The Window panel.

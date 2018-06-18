@@ -325,6 +325,7 @@ struct terminal_tag {
     bool no_remote_resize;
     bool no_remote_wintitle;
     bool no_remote_clearscroll;
+    bool osc52;
     bool rawcnp;
     bool utf8linedraw;
     bool rect_select;
