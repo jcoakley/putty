@@ -180,9 +180,8 @@ struct terminal_tag {
 #define ANSI(x,y)       ((x)+((y)*256))
 #define ANSI_QUE(x)     ANSI(x,1)
 
-#define OSC_STR_MAX 2048
-    int osc_strlen;
-    char osc_string[OSC_STR_MAX + 1];
+#define OSC_MAX 10*1024*1024
+    bufchain osc_buf;
     bool osc_w;
 
     char id_string[1024];

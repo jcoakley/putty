@@ -1680,6 +1680,7 @@ Terminal *term_init(Conf *myconf, struct unicode_data *ucsdata, TermWin *win)
     term->paste_len = 0;
     bufchain_init(&term->inbuf);
     bufchain_init(&term->printer_buf);
+    bufchain_init(&term->osc_buf);
     term->printing = term->only_printing = false;
     term->print_job = NULL;
     term->vt52_mode = false;
@@ -1781,6 +1782,7 @@ void term_free(Terminal *term)
     if(term->print_job)
         printer_finish_job(term->print_job);
     bufchain_clear(&term->printer_buf);
+    bufchain_clear(&term->osc_buf);
     sfree(term->paste_buffer);
     sfree(term->ltemp);
     sfree(term->wcFrom);
@@ -2778,27 +2780,31 @@ static void toggle_mode(Terminal *term, int mode, int query, bool state)
  */
 static void do_osc(Terminal *term)
 {
+    size_t osc_strlen = bufchain_size(&term->osc_buf);
+    char* osc_string = smalloc(osc_strlen + 1);
+    bufchain_fetch_consume(&term->osc_buf, osc_string, osc_strlen);
+
     if (term->osc_w) {
-        while (term->osc_strlen--)
+        while (osc_strlen--)
             term->wordness[(unsigned char)
-                term->osc_string[term->osc_strlen]] = term->esc_args[0];
+                osc_string[osc_strlen]] = term->esc_args[0];
     } else {
-        term->osc_string[term->osc_strlen] = '\0';
+        osc_string[osc_strlen] = '\0';
         switch (term->esc_args[0]) {
           case 0:
           case 1:
             if (!term->no_remote_wintitle)
-                win_set_icon_title(term->win, term->osc_string);
+                win_set_icon_title(term->win, osc_string);
             if (term->esc_args[0] == 1)
                 break;
             /* fall through: parameter 0 means set both */
           case 2:
           case 21:
             if (!term->no_remote_wintitle)
-                win_set_title(term->win, term->osc_string);
+                win_set_title(term->win, osc_string);
             break;
           case 4:
-            if (term->ldisc && !strcmp(term->osc_string, "?")) {
+            if (term->ldisc && !strcmp(osc_string, "?")) {
                 int r, g, b;
                 if (win_palette_get(term->win, toint(term->esc_args[1]),
                                     &r, &g, &b)) {
@@ -2820,38 +2826,42 @@ static void do_osc(Terminal *term)
                  * argument. If no semicolon found, or the first arg is present
                  * and not 'c', there's nothing to do.
                  */
-                char *semi = strchr(term->osc_string, ';');
+                char *semi = strchr(osc_string, ';');
                 if (0 == semi ||
-                    (semi != term->osc_string && term->osc_string[0] != 'c')) {
+                    (semi != osc_string && osc_string[0] != 'c')) {
                     break;
                 }
 
                 /* Decode base64 encoded 2nd parameter */
-                unsigned char decoded[2 * OSC_STR_MAX + 1] = { 0 };
-                int decoded_len = 0;
-                for (int i = 1 + semi - term->osc_string; /* start after semi */
-                     i < term->osc_strlen && decoded_len < 2 * OSC_STR_MAX;
+                unsigned char *decoded = smalloc(2 * osc_strlen + 1);
+                size_t decoded_len = 0;
+                for (size_t i = 1 + semi - osc_string; /* start after semi */
+                     i < osc_strlen && decoded_len < 2 * osc_strlen;
                      i += 4) {
-                     decoded_len += base64_decode_atom(term->osc_string + i,
+                     decoded_len += base64_decode_atom(osc_string + i,
                                                        decoded + decoded_len);
                 }
+                decoded[decoded_len] = 0;
+
 
                 /* convert to wchar_t. add 1 to result to account for
                  * null terminator (mbstowcs doesn't seem to include it in its
                  * return value).
                  */
-                wchar_t clipdata[2 * OSC_STR_MAX + 1] = { 0 };
-                int clipdata_len = mbstowcs(clipdata, (char*)decoded,
-                                            2 * OSC_STR_MAX) + 1;
-
+                wchar_t *clipdata = smalloc(2 * decoded_len + 2);
+                size_t clipdata_len = mbstowcs(clipdata, (char*)decoded,
+                                            decoded_len + 1) + 1;
                 for(int i = 0; i < term->n_mouse_select_clipboards; i++) {
                     win_clip_write(term->win, term->mouse_select_clipboards[i],
                                clipdata, 0, 0, clipdata_len, FALSE);
                 }
+                sfree(clipdata);
+                sfree(decoded);
             }
             break;
 	}
     }
+    sfree(osc_string);
 }
 
 /*
@@ -4759,7 +4769,7 @@ static void term_out(Terminal *term)
                 switch (c) {
                   case 'P':            /* Linux palette sequence */
                     term->termstate = SEEN_OSC_P;
-                    term->osc_strlen = 0;
+                    bufchain_clear(&term->osc_buf);
                     break;
                   case 'R':            /* Linux palette reset */
                     win_palette_reset(term->win);
@@ -4812,7 +4822,7 @@ static void term_out(Terminal *term)
                         term->esc_args[term->esc_nargs++] = 0;
                     } else {
                         term->termstate = OSC_STRING;
-                        term->osc_strlen = 0;
+                        bufchain_clear(&term->osc_buf);
                     }
                 }
                 break;
@@ -4841,12 +4851,12 @@ static void term_out(Terminal *term)
                     term->termstate = TOPLEVEL;
                 } else if (c == '\033')
                     term->termstate = OSC_MAYBE_ST;
-                else if (term->osc_strlen < OSC_STR_MAX)
-                    term->osc_string[term->osc_strlen++] = (char)c;
+                else if (bufchain_size(&term->osc_buf) < OSC_MAX)
+                    bufchain_add(&term->osc_buf, &c, 1);
                 break;
               case SEEN_OSC_P:
                 {
-                    int max = (term->osc_strlen == 0 ? 21 : 15);
+                    int max = (bufchain_size(&term->osc_buf) == 0 ? 21 : 15);
                     int val;
                     if ((int)c >= '0' && (int)c <= '9')
                         val = c - '0';
@@ -4858,15 +4868,17 @@ static void term_out(Terminal *term)
                         term->termstate = TOPLEVEL;
                         break;
                     }
-                    term->osc_string[term->osc_strlen++] = val;
-                    if (term->osc_strlen >= 7) {
-                        win_palette_set(
-                            term->win, term->osc_string[0],
-                            term->osc_string[1] * 16 + term->osc_string[2],
-                            term->osc_string[3] * 16 + term->osc_string[4],
-                            term->osc_string[5] * 16 + term->osc_string[6]);
-                        term_invalidate(term);
-                        term->termstate = TOPLEVEL;
+                    bufchain_add(&term->osc_buf, &val, 1);
+                    if (bufchain_size(&term->osc_buf) >= 7) {
+                      char osc_palette[7];
+                      bufchain_fetch(&term->osc_buf, &osc_palette[0], 7);
+                      win_palette_set(
+                          term->win, osc_palette[0],
+                          osc_palette[1] * 16 + osc_palette[2],
+                          osc_palette[3] * 16 + osc_palette[4],
+                          osc_palette[5] * 16 + osc_palette[6]);
+                      term_invalidate(term);
+                      term->termstate = TOPLEVEL;
                     }
                 }
                 break;
@@ -4890,7 +4902,7 @@ static void term_out(Terminal *term)
                     break;
                   default:
                     term->termstate = OSC_STRING;
-                    term->osc_strlen = 0;
+                    bufchain_clear(&term->osc_buf);
                 }
                 break;
               case VT52_ESC:
