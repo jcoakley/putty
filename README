@@ -1,3 +1,11 @@
+ATTENTION:
+This fork of PuTTY tracks the upstream releases and adds support for
+the OSC 52 escape code, i.e. allow the remote to manipulate the local
+clipboard. I make no guarantees that this is a good idea or even that
+it works.
+
+The original PuTTY README follows:
+
 This is the README for the source archive of PuTTY, a free Windows
 and Unix Telnet and SSH client.
 
